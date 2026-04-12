@@ -89,6 +89,8 @@ outb(0x22, 0x70);   // Select IMCR
 outb(0x23, inb(0x23) | 1);  // Mask external interrupts.
 
 
+---
+
 ## lapic cpu的中断设置
 
 
@@ -107,13 +109,13 @@ lapicw(int index, int value)
 
 往 lapic[index] 写入的值，其格式取决于你具体在操作哪一个寄存器。它们大多数是 32 位的位图（Bitmask），每一位（bit）或每一组位都代表一个特定的硬件开关。
 虽然每个寄存器不同，但最核心的格式主要分为以下三类：
-## 1. 简单的数值/ID 格式
+1. 简单的数值/ID 格式
 这类寄存器比较直接，直接存入一个整数。
 
 * 示例：lapic[ID]（虽然通常是只读或由 BIOS 设置）。
 * 用法：写入或读取一个 8 位的 APIC ID，用于标识当前 CPU。
 
-## 2. 带有“掩码”和“模式”的配置格式 (LVT 寄存器)
+2. 带有“掩码”和“模式”的配置格式 (LVT 寄存器)
 这是最常见的格式，用于 定时器 (Timer) 或 热传感器 (Thermal)。
 
 * 格式拆解：
@@ -126,7 +128,7 @@ lapicw(int index, int value)
 lapicw(TIMER, PERIODIC | (T_IRQ0 + IRQ_TIMER)); // PERIODIC 是模式位，T_IRQ0... 是向量号位
 
 
-## 3. 最复杂的 ICR (中断控制寄存器) 格式
+3. 最复杂的 ICR (中断控制寄存器) 格式
 这是 CPU 之间发消息（IPI） 的专用格式，通常是两个 32 位寄存器配合使用。
 
 * ICRHI (高32位)：包含 目标 CPU 的 APIC ID。
@@ -135,7 +137,7 @@ lapicw(TIMER, PERIODIC | (T_IRQ0 + IRQ_TIMER)); // PERIODIC 是模式位，T_IRQ
    * Destination Shorthand：发给谁？（发给自己、发给除了自己以外的所有人、还是发给特定的人）。
    * Delivery Mode：是普通中断，还是 INIT（强制初始化信号），还是 STARTUP（唤醒信号）。
 
-## 总结
+总结
 你可以把这些 value 想象成一排 “拨码开关”：
 
 * 有的开关管频率（定时器数值）。
@@ -159,6 +161,7 @@ lapic只设置了timer和error中断处理。
 
 无论中断是从 IOAPIC（外部硬件）发来的，还是从 LAPIC（内部定时器/错误）产生的，它们最终都化作一个向量号（Vector Number），去 IDT 里寻找处理函数。
 
+---
 
 ## gdt
 
@@ -181,7 +184,7 @@ seginit(void)
 ```
 这段代码的作用是为当前 CPU 初始化 GDT (Global Descriptor Table，全局描述符表)。
 在 x86 架构中，即使 xv6 主要使用页表（Paging）来管理内存，硬件依然要求必须设置 GDT 来定义代码和数据的访问权限（特权级）。
-## 1. 核心逻辑：分而治之
+1. 核心逻辑：分而治之
 seginit 在多核环境下会被每个 CPU 核心各调用一次。
 
 c = &cpus[cpuid()];
@@ -190,8 +193,7 @@ c = &cpus[cpuid()];
 * cpuid()：通过读取我们之前提到的 LAPIC ID，确定当前运行的是哪一个 CPU。
 * c->gdt：每个 struct cpu 内部都有自己独立的 gdt 数组。这意味着每个核心都有自己的权限表。
 
-------------------------------
-## 2. 详解四个段描述符 (The Segments)
+2. 详解四个段描述符 (The Segments)
 xv6 使用的是“扁平模型”（Flat Model），即所有段的基地址都是 0，范围都是 4GB。它们唯一的区别是权限。
 
 * SEG_KCODE (内核代码段)
@@ -205,8 +207,7 @@ xv6 使用的是“扁平模型”（Flat Model），即所有段的基地址都
 * SEG_UDATA (用户数据段)
 * DPL_USER：最低权限。用户程序的堆栈和数据。
 
-------------------------------
-## 3. 深入理解注释里的“坑”
+3. 深入理解注释里的“坑”
 代码里的这段注释非常关键：
 
 Cannot share a CODE descriptor for both kernel and user because... the CPU forbids an interrupt from CPL=0 to DPL=3.
@@ -218,8 +219,7 @@ Cannot share a CODE descriptor for both kernel and user because... the CPU forbi
 * 硬件规则：如果内核（CPL=0）正在运行，此时发生了一个中断，CPU 要求目标代码段的权限（DPL）必须等于或高于当前级别。
 * 结论：如果内核共用一个 DPL=3 的段，当中断发生时，CPU 会认为你要“跳入一个低权限区域”，这在硬件层面是不安全的，会导致 CPU 直接崩溃（General Protection Fault）。所以，必须为内核专门准备一个 DPL=0 的段。
 
-------------------------------
-## 4. 激活 GDT
+4. 激活 GDT
 
 lgdt(c->gdt, sizeof(c->gdt));
 
