@@ -160,3 +160,76 @@ lapic只设置了timer和error中断处理。
 无论中断是从 IOAPIC（外部硬件）发来的，还是从 LAPIC（内部定时器/错误）产生的，它们最终都化作一个向量号（Vector Number），去 IDT 里寻找处理函数。
 
 
+## gdt
+
+```c
+seginit(void)
+{
+  struct cpu *c;
+
+  // Map "logical" addresses to virtual addresses using identity map.
+  // Cannot share a CODE descriptor for both kernel and user
+  // because it would have to have DPL_USR, but the CPU forbids
+  // an interrupt from CPL=0 to DPL=3.
+  c = &cpus[cpuid()];
+  c->gdt[SEG_KCODE] = SEG(STA_X|STA_R, 0, 0xffffffff, 0);
+  c->gdt[SEG_KDATA] = SEG(STA_W, 0, 0xffffffff, 0);
+  c->gdt[SEG_UCODE] = SEG(STA_X|STA_R, 0, 0xffffffff, DPL_USER);
+  c->gdt[SEG_UDATA] = SEG(STA_W, 0, 0xffffffff, DPL_USER);
+  lgdt(c->gdt, sizeof(c->gdt));
+}
+```
+这段代码的作用是为当前 CPU 初始化 GDT (Global Descriptor Table，全局描述符表)。
+在 x86 架构中，即使 xv6 主要使用页表（Paging）来管理内存，硬件依然要求必须设置 GDT 来定义代码和数据的访问权限（特权级）。
+## 1. 核心逻辑：分而治之
+seginit 在多核环境下会被每个 CPU 核心各调用一次。
+
+c = &cpus[cpuid()];
+
+
+* cpuid()：通过读取我们之前提到的 LAPIC ID，确定当前运行的是哪一个 CPU。
+* c->gdt：每个 struct cpu 内部都有自己独立的 gdt 数组。这意味着每个核心都有自己的权限表。
+
+------------------------------
+## 2. 详解四个段描述符 (The Segments)
+xv6 使用的是“扁平模型”（Flat Model），即所有段的基地址都是 0，范围都是 4GB。它们唯一的区别是权限。
+
+* SEG_KCODE (内核代码段)
+* STA_X|STA_R：可执行、可读。
+   * DPL=0：最高权限（Kernel 级别）。
+* SEG_KDATA (内核数据段)
+* STA_W：可写。
+   * DPL=0：最高权限。用于内核堆栈和全局变量。
+* SEG_UCODE (用户代码段)
+* DPL_USER (即 3)：最低权限。用户程序跑在这里。
+* SEG_UDATA (用户数据段)
+* DPL_USER：最低权限。用户程序的堆栈和数据。
+
+------------------------------
+## 3. 深入理解注释里的“坑”
+代码里的这段注释非常关键：
+
+Cannot share a CODE descriptor for both kernel and user because... the CPU forbids an interrupt from CPL=0 to DPL=3.
+
+通俗解释：
+
+* CPL (Current Privilege Level)：当前 CPU 正在跑的级别（内核是 0，用户是 3）。
+* DPL (Descriptor Privilege Level)：段描述符规定的级别。
+* 硬件规则：如果内核（CPL=0）正在运行，此时发生了一个中断，CPU 要求目标代码段的权限（DPL）必须等于或高于当前级别。
+* 结论：如果内核共用一个 DPL=3 的段，当中断发生时，CPU 会认为你要“跳入一个低权限区域”，这在硬件层面是不安全的，会导致 CPU 直接崩溃（General Protection Fault）。所以，必须为内核专门准备一个 DPL=0 的段。
+
+------------------------------
+## 4. 激活 GDT
+
+lgdt(c->gdt, sizeof(c->gdt));
+
+这是最后一步：通过汇编指令 lgdt 将这个数组的地址和大小加载到 CPU 内部的 GDTR 寄存器中。从这一刻起，当前 CPU 核心就知道如何区分内核态和用户态了。
+## 总结
+seginit 就像是给每个 CPU 核心下发了一本“身份证明”：
+
+   1. 它定义了什么是高权限（内核），什么是低权限（用户）。
+   2. 它通过 SEG 宏将基址 0 和长度 4GB 填入，确保页表（Paging）能接管后续的地址转换。
+   3. 它解决了中断跳转时的权限校验问题。
+
+你想看看 SEG 宏 内部是如何通过位运算把这些权限拼接成硬件要求的 8 字节格式的吗？
+
