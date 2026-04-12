@@ -224,7 +224,7 @@ Cannot share a CODE descriptor for both kernel and user because... the CPU forbi
 lgdt(c->gdt, sizeof(c->gdt));
 
 这是最后一步：通过汇编指令 lgdt 将这个数组的地址和大小加载到 CPU 内部的 GDTR 寄存器中。从这一刻起，当前 CPU 核心就知道如何区分内核态和用户态了。
-## 总结
+总结
 seginit 就像是给每个 CPU 核心下发了一本“身份证明”：
 
    1. 它定义了什么是高权限（内核），什么是低权限（用户）。
@@ -234,9 +234,58 @@ seginit 就像是给每个 CPU 核心下发了一本“身份证明”：
 你想看看 SEG 宏 内部是如何通过位运算把这些权限拼接成硬件要求的 8 字节格式的吗？
 
 
-
+---
 
 ## picinit 关闭旧pic
 
 mpinit 里的操作是“改道”。
 picinit 里的操作是“停机”。
+
+
+---
+
+## ioapic 初始化
+
+
+mp.c里不是从mp config里取了  ioapic = (struct mpioapic*)p;吗， 为什么这里ioapic = (volatile struct ioapic*)IOAPIC; 直接把地址写做常量了
+mp.c 里的代码是通用的“普查”，而 ioapic.c 里的代码为了简单而“偷了懒”。
+
+想象 IOAPIC 是一个有几十个小抽屉的大柜子，但你面前只有两个设备：
+1. 一个键盘（reg）：让你输入抽屉编号。
+2. 一个开口（data）：当你输入编号后，那个抽屉的内容就会出现在这个开口里。
+
+
+* 想读 10 号抽屉？
+先往 reg 写 10，然后从 data 读值。
+* 想往 20 号抽屉放东西？
+先往 reg 写 20，然后往 data 写值。
+
+
+---
+
+## 原版xv6没有遍历pci 
+既然原版 xv6 没有 PCI 配置空间，那它怎么和硬件（磁盘、网卡、VGA）交互？
+答案很简单：它不和 PCI 交互。xv6 采用的是 “静态直连硬件” 的方式，直接写死硬件地址，跳过 PCI 枚举。
+
+
+---
+
+
+## pci 和ioapic 解析关系不大
+
+**IOAPIC 本身不是 PCI 设备，也不由 PCI 枚举发现；
+但 IOAPIC 的核心工作——**给 PCI 设备发中断**——高度依赖 PCI 配置空间里的信息。**
+它们是**“中断路由搭档”**的关系。
+1. 它们怎么被发现？（完全两条路）
+* IOAPIC 怎么来？
+- 从 **MP 配置表（mpinit 扫的那个）** 里读出来
+- 或从 ACPI 表里读
+- **和 PCI 一毛钱关系没有**
+
+* PCI 设备怎么来？
+- 用 **0xCF8 / 0xCFC 端口枚举**
+- 扫 bus/dev/func
+- **和 MP 表/IOAPIC 无关**
+
+“PCI 枚举 + 读取 IRQ + 配置 IOAPIC”
+
