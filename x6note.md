@@ -9,14 +9,14 @@
 ## kvmalloc  setupkvm
 把kmap的段分成4kb,4kb的块，写每个页表。 
 
-
+```c
 kmap[] = {
  { (void*)KERNBASE, 0,             EXTMEM,    PTE_W}, // I/O space
  { (void*)KERNLINK, V2P(KERNLINK), V2P(data), 0},     // kern text+rodata
  { (void*)data,     V2P(data),     PHYSTOP,   PTE_W}, // kern data+memory
  { (void*)DEVSPACE, DEVSPACE,      0,         PTE_W}, // more devices
 };
-
+```
 
 
 ## mp.c  mp mpconf
@@ -78,3 +78,8 @@ kmap[] = {
 [ Type=2 ] | [ mpioapic 其余字段... ] <-- 这是一个 IO APIC (12 字节)
 [ Type=1 ] | [ 总线数据... ]         <-- 这是一个 BUS (8 字节)
 ```
+
+
+mpinit 的核心本质就是“信息普查”与“建立索引”。
+它并不负责真正激活硬件（那是后续函数的事），它只是把 BIOS 留在内存里的那些零散的硬件参数“捞”出来，存到内核容易访问的全局变量里。
+
