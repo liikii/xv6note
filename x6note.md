@@ -17,3 +17,61 @@ kmap[] = {
  { (void*)DEVSPACE, DEVSPACE,      0,         PTE_W}, // more devices
 };
 
+
+
+## mp.c  mp mpconf
+
+[ 低地址 BIOS 区域 (通常在 0xF0000 附近) ]
++--------------------------+
+
+|      struct mp           | <--- 浮动指针结构 (Floating Pointer)
+|  signature: "_MP_"       |
+|  physaddr: 0x000F1234 ---|---- 存储了 mpconf 的物理地址
++--------------------------+    |
+
+                                |
+      (中间隔着大量的其他数据)      |
+                                |
+[ 物理地址 0x000F1234 ]         |
++--------------------------+ <--- 指向这里
+
+|    struct mpconf         | <--- 配置表头 (Table Header)
+|  signature: "PCMP"       |
++--------------------------+
+
+|  Entries (CPU/IOAPIC...) | <--- 紧跟在 mpconf 后面的条目
++--------------------------+
+
+
+
+内存地址低 -> 高
++-----------------------+ <--- conf (struct mpconf 指针指向这里)
+
+|  PCMP (Signature)     | ^
+|  Length (总长度)       | |
+|  ...                  | | struct mpconf (表头)
+|  Entry Count (条目数)  | |
+|  LAPIC Address        | |
++-----------------------+ v
+
+|  Type (MPPROC)        | ^
+|  Processor Data...    | | 第一条数据 (struct mpproc)
++-----------------------+ v
+
+|  Type (MPPROC)        | ^
+|  Processor Data...    | | 第二条数据 (struct mpproc)
++-----------------------+ v
+
+|  Type (MPIOAPIC)      | ^
+|  IOAPIC Data...       | | 第三条数据 (struct mpioapic)
++-----------------------+ v
+
+|  ...                  |
+
+
+
+地址低 -> 高
+[ Type=0 ] | [ mpproc 其余字段... ]  <-- 这是一个 CPU (20 字节)
+[ Type=0 ] | [ mpproc 其余字段... ]  <-- 这是另一个 CPU (20 字节)
+[ Type=2 ] | [ mpioapic 其余字段... ] <-- 这是一个 IO APIC (12 字节)
+[ Type=1 ] | [ 总线数据... ]         <-- 这是一个 BUS (8 字节)
