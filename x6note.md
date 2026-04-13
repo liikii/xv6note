@@ -487,7 +487,7 @@ RX/TX Descriptor  Ring 地址和大小 也是通过mmio进行设置的吗
 
 
 #### RX
- 
+
 如果 RX Ring 写满了， 没有被处理， HEAD， tail的位置， 这种情况再发到nic的数据会被丢弃
 * 1. 指针的位置：Head 撞上 Tail
 在 E1000 的接收逻辑中：
@@ -523,6 +523,22 @@ RX/TX Descriptor  Ring 地址和大小 也是通过mmio进行设置的吗
 
 TX: Transmit / Transmitter（发送 / 发送器）
 RX: Receive / Receiver（接收 / 接收器）
+
+
+#### 完整流程总结
+
+1.  **`e1000.c`**: 从硬件 RX Ring 取出数据包，调用 `ethernet_rx_helper(..., netdev_receive)`。
+2.  **`ethernet.c` (`ethernet_rx_helper`)**: 
+    *   解析以太网帧头。
+    *   提取出上层协议数据 (`payload`) 和协议类型 (`type`)。
+    *   调用 `netdev_receive(dev, type, payload, plen)`。
+3.  **`net.c` (`netdev_receive`)**: 
+    *   根据 `type` (如 `0x0800`) 在 `protocols` 链表中查找对应的处理函数。
+    *   找到后，调用该处理函数，例如 `ip_input(payload, plen, dev)`。
+4.  **上层协议 **(如 `ip.c`): 
+    *   `ip_input` 函数开始处理 IP 数据包，进行校验、路由、分片重组等操作。
+    *   然后根据 IP 头中的协议字段（如 TCP=6, UDP=17），继续将数据传递给 TCP 或 UDP 层，最终到达 socket 缓冲区，供用户程序读取。
+
 
 
 
