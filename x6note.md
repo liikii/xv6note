@@ -541,6 +541,41 @@ RX: Receive / Receiver（接收 / 接收器）
 
 
 
+```
+[网卡收到帧]
+      |
+      v
+[netdev_receive] --(EtherType=0x0800)--> [ip_input]
+      |                                      |
+      |                                      v
+      |                           [ip_input 解析 IP 头]
+      |                                      |
+      |                                      v
+      |                     (proto=6) --> [tcp_rx] (由 ip_add_protocol 注册)
+      |                                      |
+      |                                      v
+      |                          [校验: IP, 长度, 校验和]
+      |                                      |
+      |                                      v
+      |                      [在 cb_table 中查找/创建 TCB (cb)]
+      |                                      |
+      |                                      v
+      +------------------<------- [tcp_incoming_event(cb, hdr, len)]
+                                          |
+                                          v
+                             [根据 cb->state 和 hdr->flg 处理]
+                                          |
+               +--------------------------+--------------------------+
+               |                          |                          |
+               v (有数据)                 v (连接事件)              v (需回复)
+[wakeup(cb)] <--+                  [更新 cb->state]          [调用 tcp_tx 发送 ACK/RST等]
+               |                          |
+               |                          v
+               |                   [wakeup 相关的 socket]
+               |
+               v
+[tcp_api_recv 被唤醒，将数据返回给用户程序]
+```
 
 
 ---
