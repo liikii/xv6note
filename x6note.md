@@ -828,3 +828,22 @@ void swtch(struct context **old, struct context *new);
 | `12(%esp)` | 第三个函数参数，依此类推。 |
 
 
+
+
+---
+
+
+## trap.c
+
+#### 3. 底层原理：一个 Trap 的完整生命周期
+要理解 trap.c，必须知道它是如何被调用的：
+
+   1. 硬件触发：外设发信号给 CPU，或者执行了 int 指令。
+   2. 硬件压栈：CPU 自动切换到内核栈，压入 ss, esp, eflags, cs, eip。
+   3. 汇编入口 (vectors.S)：所有中断先跳转到这里，压入中断号。
+   4. 保存现场 (trapasm.S)：进一步压入所有通用寄存器，构造出 struct trapframe。
+   5. 进入 C 语言：调用 trap(tf)，也就是你看到的这段代码。
+   6. 调度与返回：
+   * Yield（让出）：如果是时钟中断，代码末尾会调用 yield()。这会触发进程切换，当前进程暂停，换另一个进程运行。
+      * 恢复现场：等 trap() 返回后，汇编代码弹出寄存器，执行 iret 指令回到用户态。
+
