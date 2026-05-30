@@ -1051,6 +1051,47 @@ mycpu()->ts.esp0 = (uint)p->kstack + KSTACKSIZE;
 TSS 结构体中的 esp0 字段，其唯一作用就是告诉 CPU 硬件：“当前运行的进程，它的内核栈顶在哪里？”
 
 
+**** fork
+
+```
+  np->sz = curproc->sz;
+  np->parent = curproc;
+  *np->tf = *curproc->tf;
+ * 号（解引用操作符）的原因是：这里正在进行结构体的“值拷贝”（Value Copy），而不是“指针拷贝”（Pointer Copy）。
+```
+
+
+**** sched 
+```
+为什么 要求 ncli 必须精确等于 1 的核心原因是：当一个进程交出 CPU 进入睡眠或等待状态时，它绝对不能持有除 ptable.lock 之外的任何其他锁。
+if(mycpu()->ncli != 1)
+  panic("sched locks");
+
+
+```
+
+
+
+**** exit
+清空资源 
+
+
+**** wait(void)
+清理 ZOMBIE 资源。 因为ZOMBIE自己不能清理自己
+
+
+
+**** scheduler(void)
+// Per-CPU process scheduler.
+// Each CPU calls scheduler() after setting itself up.
+// Scheduler never returns.  It loops, doing:
+//  - choose a process to run
+//  - swtch to start running that process
+//  - eventually that process transfers control
+//      via swtch back to the scheduler.
+
+
+
 ---
 
 #### proc story
