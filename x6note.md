@@ -1072,6 +1072,25 @@ if(mycpu()->ncli != 1)
 
 
 
+**** warkup1 处于简化考虑， 这里一下唤醒所有。 然后sleep的地方必须用while判断
+```
+//PAGEBREAK!
+// Wake up all processes sleeping on chan.
+// The ptable lock must be held.
+static void
+wakeup1(void *chan)
+{
+  struct proc *p;
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+    if(p->state == SLEEPING && p->chan == chan)
+      p->state = RUNNABLE;
+}
+
+```
+
+
+
 **** exit
 清空资源 
 
