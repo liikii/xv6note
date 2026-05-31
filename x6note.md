@@ -1332,3 +1332,75 @@ BARs 是 PCI/PCIe 设备用来向操作系统声明自己需要哪些内存或 I
 #### I/O 地址空间（专门用于传统的端口访问， 这种情况， 只是读取端口号， 记录一下， 然后就直接使用是不？
 是的，完全正确！ 你的理解非常精辟，抓住了 x86 架构中端口 I/O 处理的精髓。在这种情况下，操作系统的处理极其简单、直接。数据流和操作逻辑完全可以用你说的“读取端口号 → 记录一下 → 直接使用”三步来概括：
 
+
+
+#### startothers 
+```
+物理地址：
+ 0x6FF0       0x6FF4       0x6FF8       0x6FFC       0x7000               0x70C8
+   │            │            │            │            │                    │
+   ▼            ▼            ▼            ▼            ▼                    ▼
+┌────────────┬────────────┬────────────┬────────────┬────────────────────────┐
+│  (未使用)  │entrypgdir  │  mpenter   │   stack    │  entryother.S 汇编代码  │
+└────────────┴────────────┴────────────┴────────────┴────────────────────────┘
+             ▲            ▲            ▲            ▲
+             │            │            │            │
+          (code-12)    (code-8)     (code-4)      (code) 
+
+```
+
+
+
+#### entryother.S
+```
+# 此时 AP 运行在 16 位实模式，%cs 被硬件设置为了 0x0700 (对应物理 0x7000)
+
+movl    $-4, %eax        # 把 -4 存入寄存器
+movl    %cs:(%eax), %esp # 关键：读取 %cs:-4 (即 0x7000 - 4 = 0x6FFC) 的值，直接赋值给栈指针 %esp！
+
+movl    $-12, %eax       # 把 -12 存入寄存器
+movl    %cs:(%eax), %ecx # 读取 0x6FF4 的值（页表地址），加载到 %cr3 开启分页！
+
+movl    $-8, %eax        # 把 -8 存入寄存器
+movl    %cs:(%eax), %edx # 读取 0x6FF8 的值（mpenter 的虚拟地址）
+jmp     *%edx            # 开启分页和保护模式后，纵身一跃，跳入 C 语言的 mpenter 核心！
+
+```
+
+
+#### 为什么  startothers 后必须 写这个， 而不是写在之前
+kinit2(P2V(4*1024*1024), P2V(PHYSTOP)); // must come after startothers()
+
+kinit2 必須寫在 startothers() 之後，是因為它涉及到 多核心並行（Concurrency）的死鎖（Deadlock）和競爭條件（Race Conditions）
+開啟後，主核心在隨後的 startothers() 循環裡調用 kalloc() 就必須開始常態加鎖。而此時其他 AP 核心正在硬件級別被陸續喚醒，他們在切換保護模式和分頁時，如果發生任何異常或中斷去碰這個鎖，而主核心此時剛好卡在 while(c->started == 0) 的死等循環裡（手上可能還拉著鎖），就會立刻引發多核心死鎖（Deadlock），導致整台電腦開機畫面直接卡死。
+
+
+
+#### static void mpmain(void)  __attribute__((noreturn));
+2. 指引編譯器進行優化（生成更乾淨、高效的匯編代碼）當編譯器（如 GCC）知道一個函數絕對不會返回時，它會大刀闊斧地優化生成的匯編代碼：不保留返回現場：普通函數在開頭（Prolog）需要把當前的棧幀指標（%ebp）和一些寄存器壓入棧中，並在結尾（Epilog）把它們彈出，以便返回給上游呼叫者。既然 mpmain 永遠不返回，編譯器就會直接省去這些無謂的壓棧和彈棧動作，節約寶貴的核心棧空間和 CPU 週期。死代碼消除（Dead-code Elimination）：如果編譯器發現你在呼叫 mpmain() 之後還寫了任何程式碼（例如在匯編那端），它會直接把後面那些程式碼當作「永遠不可能執行的廢話」直接刪掉，減少內核鏡像體積。
+
+
+
+
+#### 🎯 arp.c
+這段程式碼在真實網路收發中是這樣配合工作的：
+
+   1. 主機 A 想給 IP 192.168.1.2 發包。
+   2. 主機 A 查表发现沒有這個 IP 的 MAC，於是新建一個 arp_entry，把要發的 IP 包拷貝到 entry->data 扣留下來。同時向全網廣播：“誰的 IP 是 192.168.1.2？請告訴我你的 MAC！”
+   3. 主機 B（192.168.1.2）收到廣播，回復一個 ARP REPLY 說：“我是 192.168.1.2，我的 MAC 是 AA:BB:CC:...”。
+   4. 主機 A 的網卡中斷觸發，解析出對方的 IP 和 MAC，呼叫 arp_table_update。
+   5. arp_table_update 把 AA:BB:CC:... 寫進快取，並發現 entry->data 裡還凍結著剛才沒發出去的 IP 包。
+   6. 函數立刻呼叫 dev->ops->xmit(...) 將 IP 包包裹上對方的 MAC 物理地址投遞出去，最後 kfree 釋放記憶體，大功告成！
+
+
+
+#### 3. State Transition Matrix for arp_resolve
+We can summarize the behavior of this function based on the state of the arp_table:
+
+| Current Cache State for IP | Action Taken | Return Value | What the IP Layer Does |
+|---|---|---|---|
+| MAC is known | Copy MAC to ha | ARP_RESOLVE_FOUND | Instantly encapsulates and transmits frame. |
+| Query in progress (Blank MAC) | Re-send Broadcast Request | ARP_RESOLVE_QUERY | Drops packet (or queues) and waits for retries. |
+| No entry (First time seeing IP) | Allocate entry, send Broadcast | ARP_RESOLVE_QUERY | Drops packet (or queues) and waits for retries. |
+| Table is completely full | None | ARP_RESOLVE_ERROR | Drops packet; records transmission error. |
+
