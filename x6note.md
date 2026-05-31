@@ -1404,3 +1404,20 @@ We can summarize the behavior of this function based on the state of the arp_tab
 | No entry (First time seeing IP) | Allocate entry, send Broadcast | ARP_RESOLVE_QUERY | Drops packet (or queues) and waits for retries. |
 | Table is completely full | None | ARP_RESOLVE_ERROR | Drops packet; records transmission error. |
 
+
+
+#### netproto_register 目的
+```
+ 全域鏈表頭
+┌───────────┐
+│ protocols │
+└─────┬─────┘
+      │
+      ▼
+┌──────────────┐     ┌──────────────┐
+│ type: 0x0800 │     │ type: 0x0806 │
+│ handler:ip_rx├───► │handler:arp_rx├───► NULL
+└──────────────┘     └──────────────┘
+ (IP 協定節點)        (ARP 協定節點)
+
+```
